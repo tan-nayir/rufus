@@ -46,8 +46,7 @@
 #include "dev.h"
 
 extern RUFUS_DRIVE rufus_drive[MAX_DRIVES];
-extern BOOL enable_HDDs, enable_VHDs, use_fake_units, enable_vmdk, usb_debug;
-extern BOOL list_non_usb_removable_drives, its_a_me_mario;
+extern BOOL use_fake_units, usb_debug;
 
 /*
  * Get the VID, PID and current device speed
@@ -289,11 +288,10 @@ static __inline BOOL IsVHD(const char* buffer)
 		"Arsenal_________Virtual_",
 		"KernSafeVirtual_________",
 		"Msft____Virtual_Disk____",
-		"BHYVE__________SATA_DISK",
-		"VMware__VMware_Virtual_S"	// Enabled through a cheat mode, as this lists primary disks on VMWare instances
+		"BHYVE__________SATA_DISK"
 	};
 
-	for (i = 0; i < (int)(ARRAYSIZE(vhd_name)-(enable_vmdk?0:1)); i++)
+	for (i = 0; i < (int)(ARRAYSIZE(vhd_name)); i++)
 		if (safe_strstr(buffer, vhd_name[i]) != NULL)
 			return TRUE;
 	return FALSE;
@@ -798,32 +796,12 @@ BOOL GetDevices(DWORD devnum)
 		} else if ((props.is_CARD) && ((!props.is_USB) || ((props.vid == 0) && (props.pid == 0)))) {
 			uprintf("Found card reader device '%s'", buffer);
 		} else if ((!props.is_USB) && (!props.is_UASP) && (props.is_Removable)) {
-			if (!list_non_usb_removable_drives) {
-				uprintf("Found non-USB removable device '%s' => Eliminated", buffer);
-				uuprintf("If you *REALLY* need, you can enable listing of this device with <Ctrl><Alt><F>");
-				continue;
-			}
 			uprintf("Found non-USB removable device '%s'", buffer);
 		} else {
 			if ((props.vid == 0) && (props.pid == 0)) {
-				if (!props.is_USB) {
-					// If we have a non removable SCSI drive and couldn't get a VID:PID,
-					// we are most likely dealing with a system drive => eliminate it!
-					uuprintf("Found non-USB non-removable device '%s' => Eliminated", buffer);
-					continue;
-				}
 				static_strcpy(str, "????:????");	// Couldn't figure VID:PID
 			} else {
 				static_sprintf(str, "%04X:%04X", props.vid, props.pid);
-				// I *REALLY* don't want to erase the devices below by accident.
-				if (its_a_me_mario) {
-					if ((props.vid == 0x0525) && (props.pid == 0x622b))
-						continue;
-					if ((props.vid == 0x0781) && (props.pid == 0x75a0))
-						continue;
-					if ((props.vid == 0x10d6) && (props.pid == 0x1101))
-						continue;
-				}
 				// Also ignore USB devices that have been specifically flagged by the user
 				for (s = 0; s < ARRAYSIZE(ignore_vid_pid); s++) {
 					if ((props.vid == (ignore_vid_pid[s] >> 16)) && (props.pid == (ignore_vid_pid[s] & 0xffff))) {
@@ -903,43 +881,7 @@ BOOL GetDevices(DWORD devnum)
 			}
 
 			if (GetDriveLabel(drive_index, drive_letters, &label, FALSE)) {
-				if ((props.is_SCSI) && (!props.is_UASP) && (!props.is_VHD)) {
-					if (!props.is_Removable) {
-						// Non removables should have been eliminated above, but since we
-						// are potentially dealing with system drives, better safe than sorry
-						safe_free(devint_detail_data);
-						break;
-					}
-					if (!list_non_usb_removable_drives) {
-						// Go over the mounted partitions and find if GetDriveType() says they are
-						// removable. If they are not removable, don't allow the drive to be listed
-						for (p = drive_letters; *p; p++) {
-							drive_name[0] = *p;
-							if (GetDriveTypeA(drive_name) != DRIVE_REMOVABLE)
-								break;
-						}
-						if (*p) {
-							uprintf("Device eliminated because it contains a mounted partition that is set as non-removable");
-							safe_free(devint_detail_data);
-							break;
-						}
-					}
-				}
-				if ((!enable_HDDs) && (!props.is_VHD) && (!props.is_CARD) &&
-					((score = IsHDD(drive_index, (uint16_t)props.vid, (uint16_t)props.pid, buffer)) > 0)) {
-					uprintf("Device eliminated because it was detected as a Hard Drive (score %d > 0)", score);
-					if (!list_non_usb_removable_drives)
-						uprintf("If this device is not a Hard Drive, please e-mail the author of this application");
-					uprintf("NOTE: You can enable the listing of Hard Drives under 'advanced drive properties'");
-					safe_free(devint_detail_data);
-					break;
-				} else if ((!enable_HDDs) && (props.is_CARD) && (drive_size > MAX_DEFAULT_LIST_CARD_SIZE)) {
-					uprintf("Device eliminated because it was detected as a card larger than %s",
-						SizeToHumanReadable(MAX_DEFAULT_LIST_CARD_SIZE, FALSE, FALSE));
-					uprintf("To use such a card, check 'List USB Hard Drives' under 'advanced drive properties'");
-					safe_free(devint_detail_data);
-					break;
-				} else if (props.is_VHD && IsMsDevDrive(drive_index)) {
+				if (props.is_VHD && IsMsDevDrive(drive_index)) {
 					uprintf("Device eliminated because it was detected as a Microsoft Dev Drive");
 					safe_free(devint_detail_data);
 					break;
@@ -950,11 +892,6 @@ BOOL GetDevices(DWORD devnum)
 				// Windows 10 19H1 mounts a 'PortableBaseLayer' for its Windows Sandbox feature => unlist those
 				if (safe_strcmp(label, windows_sandbox_vhd_label) == 0) {
 					uprintf("Device eliminated because it is a Windows Sandbox VHD");
-					safe_free(devint_detail_data);
-					break;
-				}
-				if (props.is_VHD && (!enable_VHDs)) {
-					uprintf("Device eliminated because listing of VHDs is disabled (Alt-G)");
 					safe_free(devint_detail_data);
 					break;
 				}
